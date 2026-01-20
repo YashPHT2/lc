@@ -1,0 +1,407 @@
+// Prisma Schema for Project Beast (CodeColosseum)
+// This schema defines all database models for the gamified LeetCode platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============== USERS & AUTH ==============
+
+model User {
+  id                String   @id @default(cuid())
+  clerkId           String   @unique
+  email             String   @unique
+  username          String   @unique
+  leetcodeUsername  String?
+  avatarUrl         String?
+  
+  // RPG Stats
+  xp                Int      @default(0)
+  level             Int      @default(1)
+  coins             Int      @default(100)  // Starting BeastCoins
+  
+  // Streak & Progress
+  currentStreak     Int      @default(0)
+  longestStreak     Int      @default(0)
+  streakFreezes     Int      @default(3)    // Free streak freezes
+  lastSolveDate     DateTime?
+  
+  // League System
+  leagueTier        LeagueTier @default(BRONZE)
+  leaguePoints      Int        @default(0)
+  
+  // LeetCode Sync Data
+  totalSolved       Int      @default(0)
+  easySolved        Int      @default(0)
+  mediumSolved      Int      @default(0)
+  hardSolved        Int      @default(0)
+  leetcodeRanking   Int?
+  lastSyncAt        DateTime?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  submissions       Submission[]
+  hostedRooms       Room[]            @relation("HostedRooms")
+  roomParticipations RoomParticipant[]
+  ownedItems        UserItem[]
+  friendsInitiated  Friend[]          @relation("FriendInitiator")
+  friendsReceived   Friend[]          @relation("FriendReceiver")
+  dailyProgress     DailyProgress[]
+  sheetProgress     SheetProgress[]
+
+  @@index([clerkId])
+  @@index([leetcodeUsername])
+}
+
+enum LeagueTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+  BEAST
+}
+
+// ============== SUBMISSIONS & PROGRESS ==============
+
+model Submission {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  problemSlug   String
+  problemTitle  String
+  difficulty    Difficulty
+  status        SubmissionStatus
+  runtime       Int?     // in ms
+  memory        Float?   // in MB
+  language      String
+  submittedAt   DateTime @default(now())
+  
+  // For room battles
+  roomId        String?
+  
+  @@index([userId, submittedAt])
+  @@index([problemSlug])
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SubmissionStatus {
+  ACCEPTED
+  WRONG_ANSWER
+  TIME_LIMIT
+  RUNTIME_ERROR
+  COMPILE_ERROR
+}
+
+model DailyProgress {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  date          DateTime @db.Date
+  problemsSolved Int     @default(0)
+  xpEarned      Int      @default(0)
+  coinsEarned   Int      @default(0)
+  
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+// ============== ROOMS (DOJO) ==============
+
+model Room {
+  id            String     @id @default(cuid())
+  code          String     @unique  // 6-char join code
+  name          String
+  
+  hostId        String
+  host          User       @relation("HostedRooms", fields: [hostId], references: [id])
+  
+  status        RoomStatus @default(WAITING)
+  isPrivate     Boolean    @default(false)
+  maxPlayers    Int        @default(4)
+  
+  // Problem for the battle
+  problemSlug   String?
+  problemTitle  String?
+  difficulty    Difficulty?
+  
+  // Wager system
+  isHardcore    Boolean    @default(false)
+  entryFee      Int        @default(0)  // BeastCoins required
+  
+  // Timing
+  duration      Int        @default(30) // minutes
+  startedAt     DateTime?
+  endedAt       DateTime?
+  
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  participants  RoomParticipant[]
+
+  @@index([code])
+  @@index([status])
+}
+
+enum RoomStatus {
+  WAITING
+  COUNTDOWN
+  ACTIVE
+  FINISHED
+}
+
+model RoomParticipant {
+  id            String   @id @default(cuid())
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  roomId        String
+  room          Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  status        ParticipantStatus @default(WAITING)
+  testCasesPassed Int    @default(0)
+  totalTestCases  Int    @default(0)
+  finishedAt    DateTime?
+  rank          Int?     // Final placement
+  coinsWon      Int      @default(0)
+  
+  joinedAt      DateTime @default(now())
+  
+  @@unique([userId, roomId])
+  @@index([roomId])
+}
+
+enum ParticipantStatus {
+  WAITING
+  SOLVING
+  FINISHED
+  SPECTATING
+  DISCONNECTED
+}
+
+// ============== SOCIAL ==============
+
+model Friend {
+  id            String   @id @default(cuid())
+  
+  initiatorId   String
+  initiator     User     @relation("FriendInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  
+  receiverId    String
+  receiver      User     @relation("FriendReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  
+  status        FriendStatus @default(PENDING)
+  isRival       Boolean      @default(false)  // Rival = highlighted in leaderboards
+  
+  createdAt     DateTime @default(now())
+  
+  @@unique([initiatorId, receiverId])
+  @@index([initiatorId])
+  @@index([receiverId])
+}
+
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+// Room Invites sent to friends
+model Invite {
+  id          String       @id @default(cuid())
+  
+  fromId      String
+  toId        String
+  roomCode    String
+  status      InviteStatus @default(PENDING)
+  message     String?      // Optional invite message
+  
+  createdAt   DateTime     @default(now())
+  expiresAt   DateTime?    // Optional expiration
+  
+  @@index([toId, status])
+  @@index([roomCode])
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+// ============== TRANSACTIONS & ECONOMY ==============
+
+model Transaction {
+  id            String          @id @default(cuid())
+  userId        String
+  
+  type          TransactionType
+  amount        Int             // Positive = earned, Negative = spent
+  description   String
+  
+  // Optional references
+  roomCode      String?         // If from a battle
+  itemId        String?         // If purchasing from shop
+  
+  createdAt     DateTime        @default(now())
+  
+  @@index([userId, createdAt])
+}
+
+enum TransactionType {
+  BATTLE_WIN          // Won a battle
+  BATTLE_ENTRY        // Entry fee for hardcore
+  DAILY_REWARD        // Daily solve bonus
+  STREAK_BONUS        // Streak milestone bonus
+  SHOP_PURCHASE       // Bought something
+  LEAGUE_PROMOTION    // Promoted to higher tier
+  REFERRAL            // Friend referral bonus
+}
+
+// ============== SHOP & ECONOMY ==============
+
+model ShopItem {
+  id            String    @id @default(cuid())
+  name          String
+  description   String
+  type          ItemType
+  price         Int       // BeastCoins
+  imageUrl      String?
+  
+  // For limited items
+  isLimited     Boolean   @default(false)
+  stock         Int?
+  
+  createdAt     DateTime  @default(now())
+  
+  owners        UserItem[]
+}
+
+enum ItemType {
+  PROFILE_FRAME
+  EDITOR_THEME
+  STREAK_FREEZE
+  XP_BOOST
+  TITLE
+}
+
+model UserItem {
+  id            String   @id @default(cuid())
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  itemId        String
+  item          ShopItem @relation(fields: [itemId], references: [id])
+  
+  isEquipped    Boolean  @default(false)
+  purchasedAt   DateTime @default(now())
+  
+  @@unique([userId, itemId])
+}
+
+// ============== COMPANY PATHS ==============
+
+model CompanyPath {
+  id            String   @id @default(cuid())
+  companyName   String   @unique
+  logoUrl       String?
+  description   String?
+  
+  problems      CompanyProblem[]
+}
+
+model CompanyProblem {
+  id            String      @id @default(cuid())
+  
+  companyId     String
+  company       CompanyPath @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  problemSlug   String
+  problemTitle  String
+  difficulty    Difficulty
+  frequency     Int         @default(0)  // How often asked
+  
+  @@unique([companyId, problemSlug])
+  @@index([companyId])
+}
+
+// ============== DSA SHEETS ==============
+
+model DsaSheet {
+  id            String   @id @default(cuid())
+  name          String   @unique  // e.g., "Striver A2Z", "NeetCode 150"
+  description   String?
+  sourceUrl     String?           // Original source URL
+  totalProblems Int      @default(0)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  problems      DsaSheetProblem[]
+}
+
+model DsaSheetProblem {
+  id            String   @id @default(cuid())
+  
+  sheetId       String
+  sheet         DsaSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  
+  problemSlug   String           // LeetCode problem slug
+  problemTitle  String
+  problemUrl    String           // Full LeetCode URL
+  platform      String           // LeetCode, CodingNinjas, etc.
+  topic         String           // Topic/Category within the sheet
+  step          String?          // Optional step info (Step 1, Step 2, etc.)
+  difficulty    Difficulty?
+  order         Int      @default(0)  // Order within the sheet
+  
+  createdAt     DateTime @default(now())
+  
+  @@unique([sheetId, problemSlug])
+  @@index([sheetId])
+  @@index([problemSlug])
+}
+
+// ============== SHEET PROGRESS (Multiplayer) ==============
+
+model SheetProgress {
+  id            String   @id @default(cuid())
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  sheetId       String   // "striver", "neetcode", etc.
+  problemId     String   // Unique problem identifier within the sheet
+  
+  status        ProgressStatus @default(COMPLETED)
+  completedAt   DateTime?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([userId, sheetId, problemId])
+  @@index([sheetId, problemId])
+  @@index([userId])
+}
+
+enum ProgressStatus {
+  IN_PROGRESS
+  COMPLETED
+}

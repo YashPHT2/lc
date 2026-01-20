@@ -1,0 +1,21 @@
+# Render Blueprint for Project Beast Backend
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: project-beast-server
+    runtime: node
+    region: singapore  # Closest to India
+    plan: free
+    rootDir: apps/server
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        sync: false  # Set manually in Render dashboard
+      - key: CLIENT_URL
+        sync: false  # Set to your Vercel frontend URL
