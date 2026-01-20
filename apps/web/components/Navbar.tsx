@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { motion, useScroll, useMotionValueEvent } from 'framer-motion';
+import { motion, useScroll, useMotionValueEvent, AnimatePresence } from 'framer-motion';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { UserButton, useUser } from '@clerk/nextjs';
+import { Menu, X } from 'lucide-react';
 
 interface BubblePosition {
     left: number;
@@ -27,6 +28,7 @@ export const Navbar = () => {
     const linkRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
     const [activeBubble, setActiveBubble] = useState<BubblePosition>({ left: 0, top: 0, width: 0, height: 0 });
     const [hoverBubble, setHoverBubble] = useState<BubblePosition>({ left: 0, top: 0, width: 0, height: 0 });
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // Bubble Navigation Refs & State (Mobile)
     const mobileNavRef = useRef<HTMLDivElement>(null);
@@ -186,7 +188,7 @@ export const Navbar = () => {
                 className="fixed top-6 left-0 right-0 z-[999] px-4 pointer-events-none"
             >
                 {/* HUD Container */}
-                <div className="mx-auto max-w-5xl px-6 py-3 flex items-center justify-between pointer-events-auto glass-navbar !rounded-full">
+                <div className="relative mx-auto max-w-5xl px-6 py-3 flex items-center justify-between pointer-events-auto glass-navbar !rounded-full">
 
                     {/* Brand */}
                     <Link href={isSignedIn ? "/dashboard" : "/"} className="flex items-center gap-3 group relative pl-2">
@@ -269,41 +271,54 @@ export const Navbar = () => {
                             </Link>
                         )}
                     </div>
+
+                    {/* Mobile Hamburger Button */}
+                    <div className="md:hidden flex items-center pl-4 border-l border-white/10 ml-2">
+                        <button
+                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                            className="p-2 text-white/80 hover:text-white transition-colors"
+                        >
+                            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+                        </button>
+                    </div>
+                    {/* Mobile Dropdown Menu (Liquid Glass) */}
+                    <AnimatePresence>
+                        {mobileMenuOpen && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -20, scale: 0.9, filter: "blur(10px)" }}
+                                animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                                exit={{ opacity: 0, y: -20, scale: 0.9, filter: "blur(10px)" }}
+                                transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
+                                className="absolute top-full right-6 mt-4 w-64 p-2 rounded-2xl glass-panel bg-[#0f172a]/70 backdrop-blur-xl border border-white/10 flex flex-col gap-1 origin-top-right z-[1000] pointer-events-auto shadow-2xl shadow-indigo-500/20 ring-1 ring-white/20"
+                            >
+                                {appLinks.map((item) => {
+                                    const isActive = isLinkActive(item.href);
+                                    return (
+                                        <Link
+                                            key={item.name}
+                                            href={item.href}
+                                            onClick={() => setMobileMenuOpen(false)}
+                                            className={`relative px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-300 ${isActive
+                                                ? 'bg-indigo-500/20 text-indigo-300 shadow-[inset_0_0_10px_rgba(99,102,241,0.2)]'
+                                                : 'text-white/70 hover:text-white hover:bg-white/5'
+                                                }`}
+                                        >
+                                            {item.name}
+                                            {isActive && (
+                                                <motion.div
+                                                    layoutId="mobile-active-glow"
+                                                    className="absolute inset-0 rounded-xl bg-indigo-500/10 -z-10"
+                                                    transition={{ type: "spring", duration: 0.6 }}
+                                                />
+                                            )}
+                                        </Link>
+                                    );
+                                })}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </motion.nav>
-
-            {/* Mobile Bottom Dock - Blue Glass Style */}
-            {isSignedIn && (
-                <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] w-auto max-w-[95vw]">
-                    <div className="nav-bubble-wrap-mobile">
-                        <div className="nav-bubble-links !gap-0.5 !p-1.5" ref={mobileNavRef}>
-                            {/* Active Bubble */}
-                            <div
-                                className="bubble-active-mobile"
-                                style={{
-                                    left: mobileActiveBubble.left,
-                                    top: mobileActiveBubble.top,
-                                    width: mobileActiveBubble.width,
-                                    height: mobileActiveBubble.height,
-                                }}
-                            />
-                            {appLinks.map((item) => {
-                                const isActive = isLinkActive(item.href);
-                                return (
-                                    <Link
-                                        key={item.name}
-                                        href={item.href}
-                                        ref={(el) => { mobileLinkRefs.current[item.href] = el; }}
-                                        className={`nav-bubble-link-mobile ${isActive ? 'active' : ''}`}
-                                    >
-                                        {item.name}
-                                    </Link>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-            )}
         </>
     );
 };

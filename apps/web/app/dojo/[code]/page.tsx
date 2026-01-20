@@ -6,6 +6,8 @@ import { useUser } from '@clerk/nextjs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSocket } from '@/lib/socket';
 import { FriendsList } from '@/components/social';
+import confetti from 'canvas-confetti';
+import { playNotificationSound } from '@/lib/audio';
 
 interface Participant {
     userId: string;
@@ -71,6 +73,32 @@ export default function BattleRoomPage() {
     const [showFriends, setShowFriends] = useState(false);
     const [winnerId, setWinnerId] = useState<string | null>(null);
 
+    // Notifications
+    const [notification, setNotification] = useState<{ message: string; type: 'info' | 'warning' | 'success' } | null>(null);
+
+    // Confetti / Celebration Logic
+    const triggerCelebration = useCallback(() => {
+        const duration = 3000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 999 };
+
+        const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+        const interval: any = setInterval(function () {
+            const timeLeft = animationEnd - Date.now();
+
+            if (timeLeft <= 0) {
+                return clearInterval(interval);
+            }
+
+            const particleCount = 50 * (timeLeft / duration);
+            confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+            confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+        }, 250);
+
+        playNotificationSound('success');
+    }, []);
+
     // LeetCode problem opened in new tab
     const [problemOpened, setProblemOpened] = useState(false);
 
@@ -101,6 +129,7 @@ export default function BattleRoomPage() {
         // Event listeners
         socket.on('room:participant-joined', (data: Participant) => {
             setRoom(prev => prev ? { ...prev, participants: [...prev.participants, data] } : null);
+            playNotificationSound('chat');
         });
 
         socket.on('room:participant-left', (data: { userId: string }) => {
@@ -119,16 +148,20 @@ export default function BattleRoomPage() {
 
         socket.on('room:chat-message', (msg: ChatMessage) => {
             setRoom(prev => prev ? { ...prev, chat: [...prev.chat, msg] } : null);
+            if (msg.userId !== user.id) playNotificationSound('chat');
         });
 
         socket.on('room:starting', (data: { countdown: number }) => {
             setCountdown(data.countdown);
+            playNotificationSound('warning'); // Beep for countdown
             let count = data.countdown;
             const interval = setInterval(() => {
                 count--;
                 setCountdown(count);
+                if (count > 0) playNotificationSound('warning');
                 if (count <= 0) {
                     clearInterval(interval);
+                    playNotificationSound('start'); // GONG
                     setTimeout(() => setCountdown(null), 1000);
                 }
             }, 1000);
@@ -137,6 +170,8 @@ export default function BattleRoomPage() {
         socket.on('room:started', (data) => {
             setRoom(prev => prev ? { ...prev, status: 'in_progress', ...data } : null);
             setTimeRemaining(data.duration * 60);
+            setNotification({ message: '⚔️ BATTLE START!', type: 'success' });
+            setTimeout(() => setNotification(null), 3000);
         });
 
         socket.on('room:participant-solved', (data: { userId: string; solveTime: number }) => {
@@ -146,11 +181,26 @@ export default function BattleRoomPage() {
                     p.userId === data.userId ? { ...p, solved: true, solveTime: data.solveTime } : p
                 ),
             } : null);
+
+            if (data.userId === user.id) {
+                triggerCelebration();
+                setNotification({ message: '🎉 Problem Solved!', type: 'success' });
+            } else {
+                playNotificationSound('chat');
+            }
         });
 
         socket.on('room:finished', (data: { rankings: Participant[]; winnerId: string }) => {
             setRoom(prev => prev ? { ...prev, status: 'finished', participants: data.rankings } : null);
             setWinnerId(data.winnerId);
+            if (data.winnerId === user.id) {
+                playNotificationSound('win');
+                confetti({
+                    particleCount: 200,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+            }
         });
 
         // Voting events
@@ -196,9 +246,27 @@ export default function BattleRoomPage() {
         };
     }, [socket, user, roomCode]);
 
-    // Timer
+    // Timer & Warnings
     useEffect(() => {
         if (timeRemaining === null || timeRemaining <= 0) return;
+
+        // Audio/Visual Warnings
+        if (timeRemaining === 600) { // 10 mins
+            playNotificationSound('warning');
+            setNotification({ message: '⚠️ 10 Minutes Remaining!', type: 'warning' });
+            setTimeout(() => setNotification(null), 5000);
+        }
+        if (timeRemaining === 300) { // 5 mins
+            playNotificationSound('warning');
+            setNotification({ message: '⚠️ 5 Minutes Remaining!', type: 'warning' });
+            setTimeout(() => setNotification(null), 5000);
+        }
+        if (timeRemaining === 60) { // 1 min
+            playNotificationSound('warning');
+            setNotification({ message: '⚠️ 1 Minute Remaining!', type: 'warning' });
+            setTimeout(() => setNotification(null), 5000);
+        }
+
         const interval = setInterval(() => setTimeRemaining(prev => prev !== null ? Math.max(0, prev - 1) : null), 1000);
         return () => clearInterval(interval);
     }, [timeRemaining]);
@@ -470,9 +538,9 @@ export default function BattleRoomPage() {
                                                                 <div className="flex items-center justify-between mb-2">
                                                                     <div className="flex items-center gap-2">
                                                                         <span className={`text-xs px-2 py-0.5 rounded ${suggestion.difficulty === 'Easy' ? 'bg-green-500/20 text-green-400' :
-                                                                                suggestion.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                                                    suggestion.difficulty === 'Hard' ? 'bg-red-500/20 text-red-400' :
-                                                                                        'bg-gray-500/20 text-gray-400'
+                                                                            suggestion.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                                suggestion.difficulty === 'Hard' ? 'bg-red-500/20 text-red-400' :
+                                                                                    'bg-gray-500/20 text-gray-400'
                                                                             }`}>
                                                                             {suggestion.difficulty}
                                                                         </span>
@@ -481,8 +549,8 @@ export default function BattleRoomPage() {
                                                                     <button
                                                                         onClick={() => handleVote(suggestion.id)}
                                                                         className={`px-3 py-1 text-sm font-bold rounded transition-all ${hasVoted
-                                                                                ? 'bg-beast-primary text-beast-dark-500'
-                                                                                : 'bg-beast-dark-300 text-beast-primary border border-beast-primary/50 hover:bg-beast-primary/10'
+                                                                            ? 'bg-beast-primary text-beast-dark-500'
+                                                                            : 'bg-beast-dark-300 text-beast-primary border border-beast-primary/50 hover:bg-beast-primary/10'
                                                                             }`}
                                                                     >
                                                                         {hasVoted ? '✓ Voted' : 'Vote'}
@@ -534,8 +602,8 @@ export default function BattleRoomPage() {
                                             <div className="text-sm text-beast-primary mb-2">🎯 Problem Locked!</div>
                                             <h3 className="text-xl font-bold text-white mb-2">{room.problemTitle || room.problemSlug}</h3>
                                             <span className={`text-xs px-2 py-0.5 rounded ${room.difficulty === 'Easy' ? 'bg-green-500/20 text-green-400' :
-                                                    room.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                        'bg-red-500/20 text-red-400'
+                                                room.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                    'bg-red-500/20 text-red-400'
                                                 }`}>
                                                 {room.difficulty}
                                             </span>
@@ -552,13 +620,15 @@ export default function BattleRoomPage() {
                                                 onClick={handleReady}
                                                 disabled={!room.problemLocked}
                                                 className={`py-3 rounded-lg font-bold transition-all ${!room.problemLocked
-                                                        ? 'bg-beast-dark-400 text-muted-foreground cursor-not-allowed'
-                                                        : me?.isReady
-                                                            ? 'bg-green-500/20 text-green-400 border border-green-500/50'
-                                                            : 'bg-beast-dark-300 text-white border border-beast-primary/30 hover:border-beast-primary'
+                                                    ? 'bg-beast-dark-400 text-muted-foreground cursor-not-allowed'
+                                                    : me?.isReady
+                                                        ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                                                        : 'bg-beast-dark-300 text-white border border-beast-primary/30 hover:border-beast-primary'
                                                     }`}
                                             >
-                                                {!room.problemLocked ? '🔒 Lock a problem first' : me?.isReady ? '✅ READY!' : '⚔️ CLICK TO READY'}
+                                                {!room.problemLocked
+                                                    ? (isHost ? '🔒 Lock a problem first' : '⏳ Waiting for Host to Lock Problem')
+                                                    : me?.isReady ? '✅ READY!' : '⚔️ CLICK TO READY'}
                                             </button>
                                             {isHost && (
                                                 <button
@@ -651,7 +721,7 @@ export default function BattleRoomPage() {
                                 value={chatInput}
                                 onChange={e => setChatInput(e.target.value)}
                                 placeholder="Type a message..."
-                                className="flex-1 py-2 px-3 bg-beast-dark-400 border border-beast-primary/30 rounded-lg text-sm focus:outline-none"
+                                className="flex-1 py-2 px-3 bg-beast-dark-400 border border-beast-primary/30 rounded-lg text-sm text-black focus:outline-none"
                             />
                             <button type="submit" className="px-4 bg-beast-primary text-beast-dark-500 font-bold rounded-lg">
                                 Send
@@ -728,6 +798,23 @@ export default function BattleRoomPage() {
                         className="fixed right-4 top-20 z-40"
                     >
                         <FriendsList roomCode={roomCode} onClose={() => setShowFriends(false)} />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Notification Toast */}
+            <AnimatePresence>
+                {notification && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -50 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -50 }}
+                        className={`fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full font-bold shadow-2xl border ${notification.type === 'warning' ? 'bg-red-500/90 text-white border-red-400' :
+                            notification.type === 'success' ? 'bg-green-500/90 text-white border-green-400' :
+                                'bg-blue-500/90 text-white border-blue-400'
+                            }`}
+                    >
+                        {notification.message}
                     </motion.div>
                 )}
             </AnimatePresence>
