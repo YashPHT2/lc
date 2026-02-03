@@ -2,8 +2,10 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import confetti from 'canvas-confetti';
+import { playNotificationSound } from '@/lib/audio';
 
 interface Problem {
     id: string;
@@ -100,6 +102,141 @@ export default function SheetDetail() {
     const [communityProgress, setCommunityProgress] = useState<UserProgress[]>([]);
     const [loadingCommunity, setLoadingCommunity] = useState(false);
 
+    // Dopamine features state
+    const [streak, setStreak] = useState(0);
+    const [lastCompletionTime, setLastCompletionTime] = useState<number>(0);
+    const [motivationalMessage, setMotivationalMessage] = useState<string | null>(null);
+    const [floatingPlus, setFloatingPlus] = useState<{ id: string; x: number; y: number } | null>(null);
+
+    const MOTIVATIONAL_MESSAGES = [
+        "🔥 You're on fire!",
+        "⚡ Unstoppable!",
+        "🧠 Big brain energy!",
+        "💪 Keep crushing it!",
+        "🚀 To the moon!",
+        "✨ Another one down!",
+        "🎯 Locked in!",
+        "👑 Absolute legend!",
+        "💎 Diamond hands!",
+        "🌟 Star player!",
+    ];
+
+    const triggerCelebration = useCallback((problemId: string, solvedCount: number, event?: React.MouseEvent) => {
+        // Play sound
+        playNotificationSound('success');
+
+        // Small confetti burst
+        const rect = event?.currentTarget?.getBoundingClientRect();
+        const x = rect ? (rect.left + rect.width / 2) / window.innerWidth : 0.5;
+        const y = rect ? rect.top / window.innerHeight : 0.5;
+
+        confetti({
+            particleCount: 30,
+            spread: 60,
+            origin: { x, y },
+            colors: ['#6366f1', '#8b5cf6', '#a855f7', '#22c55e'],
+            ticks: 100,
+            gravity: 1.2,
+            scalar: 0.8,
+        });
+
+        // Sky shot rockets! 🚀
+        const launchRocket = (delay: number, xPos: number) => {
+            setTimeout(() => {
+                // Rocket trail going up
+                const duration = 800;
+                const end = Date.now() + duration;
+
+                const frame = () => {
+                    const timeLeft = end - Date.now();
+                    if (timeLeft <= 0) {
+                        // BURST at the top! 💥
+                        confetti({
+                            particleCount: 80,
+                            spread: 360,
+                            origin: { x: xPos, y: 0.2 },
+                            colors: ['#ff0000', '#ffa500', '#ffff00', '#00ff00', '#00bfff', '#8b00ff', '#ff69b4'],
+                            ticks: 200,
+                            gravity: 0.8,
+                            scalar: 1.2,
+                            shapes: ['circle', 'square'],
+                        });
+                        return;
+                    }
+
+                    // Trail particles going up
+                    const progress = 1 - (timeLeft / duration);
+                    confetti({
+                        particleCount: 3,
+                        spread: 10,
+                        origin: { x: xPos, y: 1 - progress * 0.8 },
+                        colors: ['#ffd700', '#ff4500', '#ffffff'],
+                        ticks: 50,
+                        gravity: 2,
+                        scalar: 0.5,
+                        startVelocity: 5,
+                    });
+
+                    requestAnimationFrame(frame);
+                };
+                frame();
+            }, delay);
+        };
+
+        // Launch rockets from random positions
+        launchRocket(100, 0.2 + Math.random() * 0.1);
+        launchRocket(300, 0.7 + Math.random() * 0.1);
+
+        // Floating +1 animation
+        if (rect) {
+            setFloatingPlus({ id: problemId, x: rect.left + rect.width / 2, y: rect.top });
+            setTimeout(() => setFloatingPlus(null), 1000);
+        }
+
+        // Show motivational message (random)
+        const randomMsg = MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
+        setMotivationalMessage(randomMsg);
+        setTimeout(() => setMotivationalMessage(null), 2000);
+
+        // Streak logic
+        const now = Date.now();
+        if (now - lastCompletionTime < 30000) { // 30 second window for streak
+            setStreak(prev => prev + 1);
+        } else {
+            setStreak(1);
+        }
+        setLastCompletionTime(now);
+
+        // Milestone celebrations
+        const milestones = [10, 25, 50, 100, 150, 200, 250, 300, 400, 450];
+        if (milestones.includes(solvedCount)) {
+            // Extra celebration for milestones!
+            playNotificationSound('win');
+            setTimeout(() => {
+                confetti({
+                    particleCount: 150,
+                    spread: 100,
+                    origin: { y: 0.6 },
+                    colors: ['#ffd700', '#ffb347', '#ff6961', '#6366f1', '#22c55e'],
+                });
+            }, 300);
+            setTimeout(() => {
+                confetti({
+                    particleCount: 100,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0 },
+                });
+                confetti({
+                    particleCount: 100,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1 },
+                });
+            }, 600);
+        }
+    }, [lastCompletionTime]);
+
     // Fetch sheet data from API
     useEffect(() => {
         async function fetchSheet() {
@@ -187,10 +324,17 @@ export default function SheetDetail() {
         }
     }, [sheetId]);
 
-    const toggleCheck = async (id: string) => {
-        const newState = { ...checked, [id]: !checked[id] };
+    const toggleCheck = async (id: string, event?: React.MouseEvent) => {
+        const wasChecked = checked[id];
+        const newState = { ...checked, [id]: !wasChecked };
         setChecked(newState);
         localStorage.setItem(`sheet_progress_${sheetId}`, JSON.stringify(newState));
+
+        // Trigger celebration only when CHECKING (not unchecking)
+        if (!wasChecked) {
+            const solvedCount = Object.values(newState).filter(Boolean).length;
+            triggerCelebration(id, solvedCount, event);
+        }
 
         // Sync to API for Striver sheet (multiplayer feature)
         if (sheetId === 'striver') {
@@ -471,8 +615,8 @@ export default function SheetDetail() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={isDone}
-                                                                    onChange={() => toggleCheck(prob.id)}
-                                                                    className="peer w-5 h-5 appearance-none border-2 border-slate-600 rounded bg-transparent checked:bg-indigo-500 checked:border-indigo-500 cursor-pointer transition-all"
+                                                                    onChange={(e) => toggleCheck(prob.id, e as unknown as React.MouseEvent)}
+                                                                    className="peer w-5 h-5 appearance-none border-2 border-slate-600 rounded bg-transparent checked:bg-indigo-500 checked:border-indigo-500 cursor-pointer transition-all hover:scale-110"
                                                                 />
                                                                 <div className="absolute inset-0 pointer-events-none text-white hidden peer-checked:flex items-center justify-center text-xs font-bold">✓</div>
                                                             </div>
@@ -544,6 +688,51 @@ export default function SheetDetail() {
                     })}
                 </div>
             </div>
+
+            {/* Floating +1 Animation */}
+            <AnimatePresence>
+                {floatingPlus && (
+                    <motion.div
+                        initial={{ opacity: 1, y: 0, scale: 1 }}
+                        animate={{ opacity: 0, y: -50, scale: 1.5 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.8 }}
+                        className="fixed pointer-events-none text-2xl font-bold text-indigo-400 z-50"
+                        style={{ left: floatingPlus.x, top: floatingPlus.y }}
+                    >
+                        +1 ✨
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Streak Badge */}
+            <AnimatePresence>
+                {streak > 1 && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.5, x: 100 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.5, x: 100 }}
+                        className="fixed top-24 right-6 bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-full font-bold shadow-lg z-50 flex items-center gap-2"
+                    >
+                        <span className="text-xl">🔥</span>
+                        <span>{streak} Streak!</span>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Motivational Message Toast */}
+            <AnimatePresence>
+                {motivationalMessage && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 50, scale: 0.8 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 20, scale: 0.8 }}
+                        className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-full font-bold text-lg shadow-2xl z-50"
+                    >
+                        {motivationalMessage}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

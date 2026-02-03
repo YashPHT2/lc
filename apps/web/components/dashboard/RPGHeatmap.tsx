@@ -38,8 +38,12 @@ export function RPGHeatmap({
         let currentWeek: { date: string; count: number; dayOfWeek: number }[] = [];
         const currentDate = new Date(startDate);
 
-        while (currentDate <= today) {
-            const dateStr = currentDate.toISOString().split('T')[0];
+        while (currentDate.getTime() <= today.getTime()) {
+            // Use local date format to avoid timezone issues (toISOString converts to UTC)
+            const year = currentDate.getFullYear();
+            const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+            const day = String(currentDate.getDate()).padStart(2, '0');
+            const dateStr = `${year}-${month}-${day}`;
             const dayOfWeek = currentDate.getDay();
 
             currentWeek.push({
@@ -68,9 +72,9 @@ export function RPGHeatmap({
     const getIntensity = (count: number): number => {
         if (count === 0) return 0;
         if (count === 1) return 1;
-        if (count <= 3) return 2;
-        if (count <= 5) return 3;
-        return 4;
+        if (count === 2) return 2;
+        if (count <= 4) return 3;
+        return 4; // 5+ submissions = brightest
     };
 
     // Magical Gold/Fire Palette
